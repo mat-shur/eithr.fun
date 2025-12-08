@@ -1,0 +1,234 @@
+// eithr_fun.idl.ts
+
+import { Idl } from "@project-serum/anchor";
+
+export const eithrFunIdl: Idl = {
+  version: "0.1.0",
+  name: "eithr_fun",
+  instructions: [
+    {
+      name: "initializeMarket",
+      accounts: [
+        { name: "payer", isMut: true, isSigner: true },
+        { name: "marketData", isMut: true, isSigner: false },
+        { name: "marketKey", isMut: false, isSigner: false },
+        { name: "treasuryAccount", isMut: true, isSigner: false },
+        { name: "systemProgram", isMut: false, isSigner: false },
+      ],
+      args: [
+        { name: "title", type: "string" },
+        { name: "description", type: "string" },
+        { name: "sideA", type: "string" },
+        { name: "sideB", type: "string" },
+        { name: "ticketPrice", type: "u64" },
+        { name: "category", type: "string" },
+        { name: "duration", type: "u64" },
+      ],
+    },
+    {
+      name: "buyTickets",
+      accounts: [
+        { name: "payer", isMut: true, isSigner: true },
+        { name: "marketKey", isMut: false, isSigner: false },
+        { name: "marketData", isMut: true, isSigner: false },
+        { name: "treasuryAccount", isMut: true, isSigner: false },
+        { name: "userTickets", isMut: true, isSigner: false },
+        { name: "systemProgram", isMut: false, isSigner: false },
+      ],
+      args: [
+        { name: "encodedSideHash", type: "string" },
+        { name: "countOfTickets", type: "u64" },
+      ],
+    },
+    {
+      name: "finalizeMarket",
+      accounts: [
+        { name: "authority", isMut: false, isSigner: true },
+        { name: "marketKey", isMut: false, isSigner: false },
+        { name: "marketData", isMut: true, isSigner: false },
+      ],
+      args: [
+        { name: "totalTicketsSideA", type: "u64" },
+        { name: "totalTicketsSideB", type: "u64" },
+        { name: "totalAmountSideA", type: "u64" },
+        { name: "totalAmountSideB", type: "u64" },
+        { name: "winningSide", type: "u8" },
+        { name: "encryptorKey", type: "string" },
+      ],
+    },
+    {
+      name: "claimReward",
+      accounts: [
+        { name: "authority", isMut: false, isSigner: true },
+        { name: "user", isMut: true, isSigner: true },
+        { name: "marketKey", isMut: false, isSigner: false },
+        { name: "marketData", isMut: true, isSigner: false },
+        { name: "treasuryAccount", isMut: true, isSigner: false },
+        { name: "userTickets", isMut: true, isSigner: false },
+        { name: "projectTreasury", isMut: true, isSigner: false },
+        { name: "systemProgram", isMut: false, isSigner: false },
+      ],
+      args: [{ name: "claimAmount", type: "u64" }],
+    },
+  ],
+  accounts: [
+    {
+      name: "MarketData",
+      type: {
+        kind: "struct",
+        fields: [
+          { name: "title", type: "string" },
+          { name: "description", type: "string" },
+          { name: "sideA", type: "string" },
+          { name: "sideB", type: "string" },
+          { name: "category", type: "string" },
+          { name: "ticketPrice", type: "u64" },
+          { name: "duration", type: "u64" },
+          { name: "creationTime", type: "u64" },
+          { name: "encryptor", type: "string" },
+          { name: "treasuryAddress", type: "publicKey" },
+          { name: "creator", type: "publicKey" },
+          { name: "authority", type: "publicKey" },
+          { name: "totalTickets", type: "u64" },
+          { name: "totalAmount", type: "u64" },
+          { name: "isFinalized", type: "bool" },
+          { name: "isRevealed", type: "bool" },
+          { name: "winningSide", type: "u8" },
+          { name: "totalTicketsSideA", type: "u64" },
+          { name: "totalTicketsSideB", type: "u64" },
+          { name: "totalAmountSideA", type: "u64" },
+          { name: "totalAmountSideB", type: "u64" },
+        ],
+      },
+    },
+    {
+      name: "UserTickets",
+      type: {
+        kind: "struct",
+        fields: [
+          { name: "market", type: "publicKey" },
+          { name: "user", type: "publicKey" },
+          { name: "totalTickets", type: "u64" },
+          { name: "totalAmount", type: "u64" },
+          {
+            name: "choices",
+            type: {
+              vec: {
+                defined: "UserChoiceEntry",
+              },
+            },
+          },
+          { name: "hasClaimed", type: "bool" },
+        ],
+      },
+    },
+  ],
+  types: [
+    {
+      name: "UserChoiceEntry",
+      type: {
+        kind: "struct",
+        fields: [
+          { name: "encodedSideHash", type: "string" },
+          { name: "ticketCount", type: "u64" },
+          { name: "creationTime", type: "u64" },
+        ],
+      },
+    },
+  ],
+  errors: [
+    {
+      code: 6000,
+      name: "Unauthorized",
+      msg: "Unauthorized: Only the program owner can initialize the collection.",
+    },
+    { code: 6001, name: "Overflow", msg: "Overflow occurred." },
+    {
+      code: 6002,
+      name: "InsufficientFunds",
+      msg: "Not enough SOL on treasure account.",
+    },
+    {
+      code: 6003,
+      name: "MarketClosed",
+      msg: "Market is closed for ticket purchases.",
+    },
+    {
+      code: 6004,
+      name: "EncodedHashTooLong",
+      msg: "Encoded side hash is too long.",
+    },
+    {
+      code: 6005,
+      name: "InvalidTicketCount",
+      msg: "Ticket count must be > 0.",
+    },
+    {
+      code: 6006,
+      name: "UserTicketLimitExceeded",
+      msg: "User ticket limit exceeded (25% of pool or 100 absolute cap).",
+    },
+    {
+      code: 6007,
+      name: "TooManyChoicesForUser",
+      msg: "Too many choices stored for this user in this market.",
+    },
+    { code: 6008, name: "MarketFinalized", msg: "Market already finalized." },
+    {
+      code: 6009,
+      name: "MarketNotEnded",
+      msg: "Market has not ended yet.",
+    },
+    {
+      code: 6010,
+      name: "InvalidWinningSide",
+      msg: "Invalid winning side (must be 1 or 2).",
+    },
+    {
+      code: 6011,
+      name: "InconsistentTotals",
+      msg: "Provided totals are inconsistent with stored market totals.",
+    },
+    {
+      code: 6012,
+      name: "MarketNotFinalized",
+      msg: "Market is not finalized yet.",
+    },
+    {
+      code: 6013,
+      name: "AlreadyClaimed",
+      msg: "User has already claimed reward.",
+    },
+    {
+      code: 6014,
+      name: "InvalidClaimAmount",
+      msg: "Invalid claim amount.",
+    },
+    {
+      code: 6015,
+      name: "UnauthorizedUser",
+      msg: "Invalid user for this UserTickets account.",
+    },
+    { code: 6016, name: "InvalidTreasuryPda", msg: "Invalid treasury PDA." },
+    {
+      code: 6017,
+      name: "InvalidProjectTreasury",
+      msg: "Invalid project treasury account.",
+    },
+    { code: 6018, name: "EncryptorTooLong", msg: "Encryptor too long." },
+    { code: 6019, name: "TitleTooLong", msg: "Title is too long." },
+    {
+      code: 6020,
+      name: "DescriptionTooLong",
+      msg: "Description is too long.",
+    },
+    { code: 6021, name: "CategoryTooLong", msg: "Category is too long." },
+    { code: 6022, name: "SideTooLong", msg: "Side label is too long." },
+    {
+      code: 6023,
+      name: "InvalidTicketPrice",
+      msg: "Ticket price must be > 0.",
+    },
+    { code: 6024, name: "InvalidDuration", msg: "Duration must be > 0." },
+  ],
+};
