@@ -721,15 +721,15 @@ export default function MarketClient({ slug }: MarketClientProps) {
                 ].join(" ")}
                 >
                 <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.24em] text-zinc-50/80">
-                    <span>{leftPercent.toFixed(0)}%</span>
+                    <span></span>
                     <span>Side A</span>
                 </div>
                 <div className="flex-1 flex items-center">
-                    <p className="text-3xl md:text-4xl lg:text-5xl font-medium text-zinc-50">
+                    <p className="text-3xl md:text-4xl lg:text-5xl font-medium text-zinc-50 text-right w-full">
                     {uiMarket.sideA}
                     </p>
                 </div>
-                <p className="text-[11px] text-zinc-50/80 uppercase tracking-[0.24em]">
+                <p className="text-[11px] text-zinc-50/80 uppercase tracking-[0.24em] text-right w-full">
                     {!uiMarket.isFinalized
                     ? "Tap to back this side"
                     : isTie
@@ -763,7 +763,7 @@ export default function MarketClient({ slug }: MarketClientProps) {
                 >
                 <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.24em] text-zinc-50/80">
                     <span>Side B</span>
-                    <span>{rightPercent.toFixed(0)}%</span>
+                    <span></span>
                 </div>
                 <div className="flex-1 flex items-center">
                     <p className="text-3xl md:text-4xl lg:text-5xl font-medium text-zinc-50">

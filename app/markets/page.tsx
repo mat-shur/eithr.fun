@@ -10,9 +10,7 @@ import { AnchorProvider, Idl, Program } from "@project-serum/anchor";
 import { eithrFunIdl } from "../data/idl_type";
 
 // === On-chain config ===
-const PROGRAM_ID = new PublicKey(
-  "4dZuWfAH3HeU79Bd1ajUgr4RM2gGJywH2wHQfG8wQeAV"
-);
+import { PROGRAM_ID } from "../data/program";
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
 // === UI types ===

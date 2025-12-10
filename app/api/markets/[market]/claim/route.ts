@@ -17,13 +17,8 @@ import {
 import { eithrFunIdl } from "../../../../data/idl_type";
 import crypto from "crypto";
 
-const PROGRAM_ID = new PublicKey(
-  "4dZuWfAH3HeU79Bd1ajUgr4RM2gGJywH2wHQfG8wQeAV"
-);
-
-const PROJECT_TREASURY = new PublicKey(
-  "8a6yEDSFf78hCbUz84jhfq7tkBMS91X1LrnyPiE8xUMo"
-);
+import { PROGRAM_ID } from "../../../../data/program";
+import { TREASURY_ID as PROJECT_TREASURY } from "../../../../data/treasury";
 
 const sql = neon(process.env.DATABASE_URL!);
 
