@@ -6,10 +6,16 @@ import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { AnchorProvider, BN, Idl, Program } from "@project-serum/anchor";
 import { eithrFunIdl } from "../../data/idl_type";
 
-const PROGRAM_ID = new PublicKey(
-  "4dZuWfAH3HeU79Bd1ajUgr4RM2gGJywH2wHQfG8wQeAV"
-);
+import { PROGRAM_ID } from "../../data/program";
 const LAMPORTS_PER_SOL = 1_000_000_000;
+const USER_ABSOLUTE_TICKET_CAP = 100; 
+const USER_MAX_CHOICES = 32;    
+
+type UiUserTicketsOnchain = {
+  totalTickets: number;
+  totalAmountSol: number;
+  choicesCount: number;
+};
 
 type MarketPhase = "OPEN" | "AWAIT_FINALIZE" | "FINALIZED";
 
@@ -137,6 +143,9 @@ export default function MarketClient({ slug }: MarketClientProps) {
   const [claimPreview, setClaimPreview] = useState<ClaimPreview | null>(null);
   const [checkingWin, setCheckingWin] = useState(false);
 
+  const [userOnchain, setUserOnchain] = useState<UiUserTicketsOnchain | null>(null);
+  const [userOnchainLoading, setUserOnchainLoading] = useState(false);
+
   const { connection } = useConnection();
   const wallet = useWallet();
 
@@ -223,6 +232,40 @@ export default function MarketClient({ slug }: MarketClientProps) {
       return;
     }
 
+    if (userOnchain) {
+      const currentUserTickets = userOnchain.totalTickets;
+      const currentChoices = userOnchain.choicesCount;
+
+      if (currentChoices >= USER_MAX_CHOICES) {
+        setBuyMessage(
+          `You already have ${currentChoices} purchases in this market. ` +
+            `The protocol allows at most ${USER_MAX_CHOICES} separate purchases per user. ` +
+            `You can buy many tickets in one purchase, but only ${USER_MAX_CHOICES} purchases total.`
+        );
+        return;
+      }
+
+      const marketTotalTickets = uiMarket.totalTickets;
+      const newTotalMarketTickets = marketTotalTickets + effectiveTickets;
+      const newTotalUserTickets = currentUserTickets + effectiveTickets;
+
+      const dynamicLimit = Math.floor(newTotalMarketTickets / 4);
+      const allowedMaxForUser =
+        dynamicLimit < USER_ABSOLUTE_TICKET_CAP
+          ? USER_ABSOLUTE_TICKET_CAP
+          : dynamicLimit;
+
+      if (newTotalUserTickets > allowedMaxForUser) {
+        setBuyMessage(
+          `Per-user cap: you may own at most ${allowedMaxForUser} tickets in this market ` +
+            `(max of 25% of all tickets or ${USER_ABSOLUTE_TICKET_CAP} absolute). ` +
+            `You currently have ${currentUserTickets} tickets; ` +
+            `this purchase would bring you to ${newTotalUserTickets}, which exceeds the cap.`
+        );
+        return;
+      }
+    }
+
     try {
       setBuyLoading(true);
       setBuyMessage(null);
@@ -292,6 +335,16 @@ export default function MarketClient({ slug }: MarketClientProps) {
       };
 
       setMyTickets((prev) => [...prev, entry]);
+      setUserOnchain((prev) =>
+        prev
+          ? {
+              ...prev,
+              totalTickets: prev.totalTickets + effectiveTickets,
+              totalAmountSol: prev.totalAmountSol + estimatedCost,
+              choicesCount: prev.choicesCount + 1,
+            }
+          : prev
+      );
 
       setTimeout(() => {
         (async () => {
@@ -570,6 +623,78 @@ export default function MarketClient({ slug }: MarketClientProps) {
       clearInterval(id);
     };
   }, [slug, program, connection]);
+
+  useEffect(() => {
+    if (!wallet.publicKey) {
+      setUserOnchain(null);
+      return;
+    }
+  
+    let cancelled = false;
+  
+    const loadUserTickets = async () => {
+      try {
+        setUserOnchainLoading(true);
+  
+        const marketDataPk = new PublicKey(slug);
+        const [userTicketsPda] = PublicKey.findProgramAddressSync(
+          [
+            Buffer.from("user_tickets"),
+            marketDataPk.toBuffer(),
+            wallet.publicKey!.toBuffer(),
+          ],
+          PROGRAM_ID
+        );
+  
+        let account: any;
+        try {
+          account = await program.account.userTickets.fetch(userTicketsPda);
+        } catch (err) {
+          // акаунта ще нема – значить 0 квитків і 0 покупок
+          if (!cancelled) {
+            setUserOnchain({
+              totalTickets: 0,
+              totalAmountSol: 0,
+              choicesCount: 0,
+            });
+          }
+          return;
+        }
+  
+        if (cancelled) return;
+  
+        const totalTickets = (account.totalTickets as BN).toNumber();
+        const totalAmountLamports = (account.totalAmount as BN).toNumber();
+        const totalAmountSol = totalAmountLamports / LAMPORTS_PER_SOL;
+        const choicesCount = Array.isArray(account.choices)
+          ? account.choices.length
+          : 0;
+  
+        setUserOnchain({
+          totalTickets,
+          totalAmountSol,
+          choicesCount,
+        });
+      } catch (e) {
+        console.error("load user tickets error:", e);
+        if (!cancelled) {
+          setUserOnchain(null);
+        }
+      } finally {
+        if (!cancelled) setUserOnchainLoading(false);
+      }
+    };
+  
+    loadUserTickets();
+  
+    // можна час від часу оновлювати
+    const id = setInterval(loadUserTickets, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [wallet.publicKey, slug, program]);
+  
 
   useEffect(() => {
     if (!wallet.publicKey) {
@@ -945,6 +1070,9 @@ export default function MarketClient({ slug }: MarketClientProps) {
                 </div>
               </div>
 
+              {/* НОВИЙ БЛОК ПРО ЛІМІТИ */}
+  
+
               {buyMessage && (
                 <p className="text-xs text-zinc-400">{buyMessage}</p>
               )}
@@ -960,7 +1088,7 @@ export default function MarketClient({ slug }: MarketClientProps) {
           </div>
 
           <div className="space-y-4 text-xs text-zinc-400">
-            <p className="text-[11px] uppercase tracking-[0.32em] text-zinc-500">
+            {/* <p className="text-[11px] uppercase tracking-[0.32em] text-zinc-500">
               Market information
             </p>
             <p>
@@ -972,7 +1100,39 @@ export default function MarketClient({ slug }: MarketClientProps) {
               After the timer ends, anyone can trigger a finalize action via the
               backend. It reveals the encryptor on-chain, computes winners
               off-chain, and then opens up claims with a protocol fee.
-            </p>
+            </p> */}
+            <div className="rounded-2xl border border-yellow-800 bg-zinc-950/70 px-4 py-3 text-[11px] text-zinc-400 space-y-3">
+              <p className="uppercase tracking-[0.22em] text-zinc-500">
+                Per-user limits
+              </p>
+              <p>
+                You can own at most{" "}
+                <span className="text-zinc-100">
+                  max({USER_ABSOLUTE_TICKET_CAP} tickets, 25% of all tickets in this
+                  market)
+                </span>{" "}
+                across all your purchases.
+                This rule prevents from manipulating the market by big players!
+              </p>
+              <p>
+                Current <span className="text-zinc-100">on-chain</span> balance:{" "}
+                {userOnchainLoading
+                  ? "loading…"
+                  : `${userOnchain?.totalTickets ?? 0} tickets`}
+                {userOnchain && (
+                  <>
+                    {" "}
+                    · ~{userOnchain.totalAmountSol.toFixed(3)} SOL, side: unknown yet.
+                  </>
+                )}
+              </p>
+              <p>
+                Purchases limit: up to{" "}
+                <span className="text-zinc-100">{USER_MAX_CHOICES}</span> separate
+                purchases in this market. You can buy many tickets per purchase, but only{" "}
+                {USER_MAX_CHOICES} purchases total.
+              </p>
+            </div>
           </div>
         </div>
         )}
@@ -1054,19 +1214,11 @@ export default function MarketClient({ slug }: MarketClientProps) {
                     </div>
                   </div>
                 </div>
-
-                <div className="flex items-center justify-between text-[11px] text-zinc-500 pt-1">
-                  <span></span>
-                  <span>
-                    {totalTickets} tickets · ~{" "}
-                    {(totalTickets * uiMarket.ticketPriceSol).toFixed(3)} SOL
-                  </span>
-                </div>
               </>
             )}
 
             <p className="text-[10px] text-zinc-600">
-              Stored only in your browser - does not affect on-chain balances.
+              Sides stored only in your browser - does not affect on-chain.
             </p>
           </div>
         </div>
