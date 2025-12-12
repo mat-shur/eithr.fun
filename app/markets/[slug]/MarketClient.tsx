@@ -8,8 +8,8 @@ import { eithrFunIdl } from "../../data/idl_type";
 
 import { PROGRAM_ID } from "../../data/program";
 const LAMPORTS_PER_SOL = 1_000_000_000;
-const USER_ABSOLUTE_TICKET_CAP = 100; 
-const USER_MAX_CHOICES = 32;    
+const USER_ABSOLUTE_TICKET_CAP = 100;
+const USER_MAX_CHOICES = 32;
 
 type UiUserTicketsOnchain = {
   totalTickets: number;
@@ -20,30 +20,30 @@ type UiUserTicketsOnchain = {
 type MarketPhase = "OPEN" | "AWAIT_FINALIZE" | "FINALIZED";
 
 type MarketClientProps = {
-  slug: string; 
+  slug: string;
 };
 
 type UiMarketState = {
-    title: string;
-    description: string;
-    sideA: string;
-    sideB: string;
-  
-    ticketPriceSol: number;
-    poolSol: number;      
-    treasurySol: number;  
-  
-    endTs: number;      
-    isFinalized: boolean;
-    winningSide: 0 | 1 | 2;
-  
-    totalTickets: number;
-    totalTicketsSideA: number;
-    totalTicketsSideB: number;
-  
-    sideAPercent: number;
-    sideBPercent: number;
-  };
+  title: string;
+  description: string;
+  sideA: string;
+  sideB: string;
+
+  ticketPriceSol: number;
+  poolSol: number;
+  treasurySol: number;
+
+  endTs: number;
+  isFinalized: boolean;
+  winningSide: 0 | 1 | 2;
+
+  totalTickets: number;
+  totalTicketsSideA: number;
+  totalTicketsSideB: number;
+
+  sideAPercent: number;
+  sideBPercent: number;
+};
 
 type SideColors = {
   a: string;
@@ -51,17 +51,34 @@ type SideColors = {
 };
 
 type ClaimPreview = {
-    checkedAt: string;
-    canClaim: boolean;
-    hasClaimed: boolean;
-    isTie: boolean;
-    winningSide: 0 | 1 | 2;
-    claimAmountLamports: number;
-    claimSol: number;
-    userWinningTickets: number;
-    winningTotalTickets: number;
-  };
-  
+  checkedAt: string;
+  canClaim: boolean;
+  hasClaimed: boolean;
+  isTie: boolean;
+  winningSide: 0 | 1 | 2;
+  claimAmountLamports: number;
+  claimSol: number;
+  userWinningTickets: number;
+  winningTotalTickets: number;
+};
+
+type MarketStatsRow = {
+  wallet: string;
+  ticketsA: number;
+  ticketsB: number;
+  amountSol: number;
+  pnlSol: number;
+  outcome: "WIN" | "LOSE" | "TIE" | "NEUTRAL";
+};
+
+type MarketStatsResponse = {
+  rows: MarketStatsRow[];
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  totalRows: number;
+};
+
 function hashStringToInt(str: string): number {
   let h = 0;
   for (let i = 0; i < str.length; i++) {
@@ -116,7 +133,7 @@ type LocalTicketEntry = {
   count: number;
   createdAt: string;
   txSig?: string;
-  encodedHash?: string; 
+  encodedHash?: string;
 };
 
 const LOCAL_TICKETS_PREFIX = "eithr_fun_tickets_v1";
@@ -124,9 +141,21 @@ const LOCAL_TICKETS_PREFIX = "eithr_fun_tickets_v1";
 const makeLocalStorageKey = (marketSlug: string, userPubkey: string) =>
   `${LOCAL_TICKETS_PREFIX}:${marketSlug}:${userPubkey}`;
 
+function formatAddress(addr: string): string {
+  if (!addr) return "";
+  if (addr.length <= 10) return addr;
+  return `${addr.slice(0, 4)}…${addr.slice(-4)}`;
+}
+
+function formatPnL(pnl: number): string {
+  const fixed = pnl.toFixed(4);
+  if (pnl > 0) return `+${fixed}`;
+  return fixed;
+}
+
 export default function MarketClient({ slug }: MarketClientProps) {
   const [uiMarket, setUiMarket] = useState<UiMarketState | null>(null);
-  const [sideColors, setSideColors] = useState<SideColors>(pickSideColors(slug));
+  const [sideColors] = useState<SideColors>(pickSideColors(slug));
   const [selectedSide, setSelectedSide] = useState<"a" | "b">("a");
   const [tickets, setTickets] = useState<number>(10);
   const [loading, setLoading] = useState<boolean>(true);
@@ -143,8 +172,17 @@ export default function MarketClient({ slug }: MarketClientProps) {
   const [claimPreview, setClaimPreview] = useState<ClaimPreview | null>(null);
   const [checkingWin, setCheckingWin] = useState(false);
 
-  const [userOnchain, setUserOnchain] = useState<UiUserTicketsOnchain | null>(null);
+  const [userOnchain, setUserOnchain] = useState<UiUserTicketsOnchain | null>(
+    null
+  );
   const [userOnchainLoading, setUserOnchainLoading] = useState(false);
+
+  // STATS state
+  const [statsRows, setStatsRows] = useState<MarketStatsRow[]>([]);
+  const [statsPage, setStatsPage] = useState(1);
+  const [statsTotalPages, setStatsTotalPages] = useState(1);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState<string | null>(null);
 
   const { connection } = useConnection();
   const wallet = useWallet();
@@ -153,13 +191,13 @@ export default function MarketClient({ slug }: MarketClientProps) {
 
   const [nowTs, setNowTs] = useState(() => Math.floor(Date.now() / 1000));
 
-    useEffect(() => {
+  useEffect(() => {
     const id = setInterval(() => {
-        setNowTs(Math.floor(Date.now() / 1000));
+      setNowTs(Math.floor(Date.now() / 1000));
     }, 1000);
 
     return () => clearInterval(id);
-    }, []);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -383,33 +421,32 @@ export default function MarketClient({ slug }: MarketClientProps) {
       setClaimMessage("Connect wallet first.");
       return;
     }
-  
+
     try {
       setCheckingWin(true);
       setClaimMessage(null);
-  
+
       const res = await fetch(`/api/markets/${slug}/check`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user: wallet.publicKey.toBase58() }),
       });
-  
+
       const json = await res.json().catch(() => null);
-  
+
       if (!res.ok || !json?.ok) {
-        const errMsg =
-          json?.error || json?.message || `Check API error`;
+        const errMsg = json?.error || json?.message || `Check API error`;
         setClaimMessage(`Check failed: ${errMsg}`);
         setClaimPreview(null);
         return;
       }
-  
+
       const lamports = Number(json.claimAmount ?? 0);
       const claimSol =
         Number.isFinite(lamports) && lamports > 0
           ? lamports / LAMPORTS_PER_SOL
           : 0;
-  
+
       setClaimPreview({
         checkedAt: new Date().toISOString(),
         canClaim: json.canClaim,
@@ -421,7 +458,7 @@ export default function MarketClient({ slug }: MarketClientProps) {
         userWinningTickets: json.userWinningTickets ?? 0,
         winningTotalTickets: json.winningTotalTickets ?? 0,
       });
-  
+
       if (json.hasClaimed) {
         setClaimMessage("You have already claimed on this market.");
       } else if (json.canClaim && claimSol > 0) {
@@ -441,7 +478,6 @@ export default function MarketClient({ slug }: MarketClientProps) {
       setCheckingWin(false);
     }
   };
-  
 
   // ---- FINALIZE ----
   const handleFinalize = async () => {
@@ -462,11 +498,11 @@ export default function MarketClient({ slug }: MarketClientProps) {
 
       const json = JSON.parse(text);
 
-    let winnerLabel = "Tie · refunds";
-    if (json.winningSide === 1) winnerLabel = uiMarket?.sideA ?? "Side A";
-    if (json.winningSide === 2) winnerLabel = uiMarket?.sideB ?? "Side B";
+      let winnerLabel = "Tie · refunds";
+      if (json.winningSide === 1) winnerLabel = uiMarket?.sideA ?? "Side A";
+      if (json.winningSide === 2) winnerLabel = uiMarket?.sideB ?? "Side B";
 
-    setBuyMessage(`Market finalized. ${winnerLabel}.`);
+      setBuyMessage(`Market finalized. ${winnerLabel}.`);
     } catch (e: any) {
       console.error("Finalize error:", e);
       setBuyMessage("Finalize failed: " + (e?.message ?? "Unknown error"));
@@ -495,8 +531,7 @@ export default function MarketClient({ slug }: MarketClientProps) {
 
       const json = await res.json();
       if (!res.ok || !json.ok) {
-        const errMsg =
-          json?.error || json?.message || "Claim API error";
+        const errMsg = json?.error || json?.message || "Claim API error";
         setClaimMessage(`Claim failed: ${errMsg}`);
         return;
       }
@@ -507,13 +542,10 @@ export default function MarketClient({ slug }: MarketClientProps) {
       tx.feePayer = wallet.publicKey;
 
       const signedTx = await wallet.signTransaction(tx);
-      const sig = await connection.sendRawTransaction(
-        signedTx.serialize(),
-        {
-          skipPreflight: false,
-          preflightCommitment: "confirmed",
-        }
-      );
+      const sig = await connection.sendRawTransaction(signedTx.serialize(), {
+        skipPreflight: false,
+        preflightCommitment: "confirmed",
+      });
       await connection.confirmTransaction(sig, "confirmed");
 
       const claimLamports = json.claimAmount
@@ -541,17 +573,18 @@ export default function MarketClient({ slug }: MarketClientProps) {
     }
   };
 
+  // LOAD MARKET
   useEffect(() => {
     let cancelled = false;
     let first = true;
-  
+
     const loadMarket = async () => {
       try {
         const marketDataPk = new PublicKey(slug);
         const account: any = await program.account.marketData.fetch(
           marketDataPk
         );
-  
+
         const ticketPriceLamports = (account.ticketPrice as BN).toNumber();
         const totalAmountLamports = (account.totalAmount as BN).toNumber();
         const duration = (account.duration as BN).toNumber();
@@ -560,30 +593,30 @@ export default function MarketClient({ slug }: MarketClientProps) {
         const ticketsA = (account.totalTicketsSideA as BN).toNumber();
         const ticketsB = (account.totalTicketsSideB as BN).toNumber();
         const winningSideNum = Number(account.winningSide) as 0 | 1 | 2;
-  
+
         const endTs = creationTime + duration;
-  
+
         const ticketPriceSol = ticketPriceLamports / LAMPORTS_PER_SOL;
         const poolSol = totalAmountLamports / LAMPORTS_PER_SOL;
-  
+
         const isFinalized: boolean = account.isFinalized;
-  
+
         let sideAPercent = 50;
         let sideBPercent = 50;
-  
+
         if (isFinalized && totalTickets > 0) {
           sideAPercent = (ticketsA / totalTickets) * 100;
           sideBPercent = 100 - sideAPercent;
         }
-  
+
         const treasuryPubkey = new PublicKey(account.treasuryAddress);
         const treasuryBalanceLamports = await connection.getBalance(
           treasuryPubkey
         );
         const treasurySol = treasuryBalanceLamports / LAMPORTS_PER_SOL;
-  
+
         if (cancelled) return;
-  
+
         setUiMarket({
           title: account.title as string,
           description: account.description as string,
@@ -613,10 +646,10 @@ export default function MarketClient({ slug }: MarketClientProps) {
         }
       }
     };
-  
+
     setLoading(true);
     loadMarket();
-  
+
     const id = setInterval(loadMarket, 10000);
     return () => {
       cancelled = true;
@@ -624,18 +657,19 @@ export default function MarketClient({ slug }: MarketClientProps) {
     };
   }, [slug, program, connection]);
 
+  // LOAD USER ONCHAIN TICKETS
   useEffect(() => {
     if (!wallet.publicKey) {
       setUserOnchain(null);
       return;
     }
-  
+
     let cancelled = false;
-  
+
     const loadUserTickets = async () => {
       try {
         setUserOnchainLoading(true);
-  
+
         const marketDataPk = new PublicKey(slug);
         const [userTicketsPda] = PublicKey.findProgramAddressSync(
           [
@@ -645,12 +679,11 @@ export default function MarketClient({ slug }: MarketClientProps) {
           ],
           PROGRAM_ID
         );
-  
+
         let account: any;
         try {
           account = await program.account.userTickets.fetch(userTicketsPda);
         } catch (err) {
-          // акаунта ще нема – значить 0 квитків і 0 покупок
           if (!cancelled) {
             setUserOnchain({
               totalTickets: 0,
@@ -660,16 +693,16 @@ export default function MarketClient({ slug }: MarketClientProps) {
           }
           return;
         }
-  
+
         if (cancelled) return;
-  
+
         const totalTickets = (account.totalTickets as BN).toNumber();
         const totalAmountLamports = (account.totalAmount as BN).toNumber();
         const totalAmountSol = totalAmountLamports / LAMPORTS_PER_SOL;
         const choicesCount = Array.isArray(account.choices)
           ? account.choices.length
           : 0;
-  
+
         setUserOnchain({
           totalTickets,
           totalAmountSol,
@@ -684,28 +717,69 @@ export default function MarketClient({ slug }: MarketClientProps) {
         if (!cancelled) setUserOnchainLoading(false);
       }
     };
-  
+
     loadUserTickets();
-  
-    // можна час від часу оновлювати
+
     const id = setInterval(loadUserTickets, 15000);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
   }, [wallet.publicKey, slug, program]);
-  
 
+  // AUTO CHECK WIN ON FINALIZED
   useEffect(() => {
     if (!wallet.publicKey) {
       setClaimPreview(null);
       return;
     }
     if (!uiMarket?.isFinalized) return;
-  
+
     runCheckWin();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallet.publicKey, slug, uiMarket?.isFinalized]);
-  
+
+  // LOAD STATS WHEN FINALIZED
+  useEffect(() => {
+    if (!uiMarket?.isFinalized) return;
+
+    let cancelled = false;
+
+    const loadStats = async () => {
+      try {
+        setStatsLoading(true);
+        setStatsError(null);
+
+        const res = await fetch(
+          `/api/markets/${slug}/stats?page=${statsPage}&pageSize=20`
+        );
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || "Failed to load stats");
+        }
+
+        const json = (await res.json()) as MarketStatsResponse;
+        if (cancelled) return;
+
+        setStatsRows(json.rows);
+        setStatsTotalPages(json.totalPages || 1);
+      } catch (e: any) {
+        console.error("load stats error:", e);
+        if (!cancelled) {
+          setStatsError(e?.message ?? "Failed to load stats");
+        }
+      } finally {
+        if (!cancelled) setStatsLoading(false);
+      }
+    };
+
+    loadStats();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, uiMarket?.isFinalized, statsPage]);
+
   // ---- RENDER ----
   if (loading) {
     return (
@@ -731,19 +805,18 @@ export default function MarketClient({ slug }: MarketClientProps) {
   const hasEnded = nowTs >= endTs;
   const isFinalized = uiMarket.isFinalized;
 
-  const phase: MarketPhase = 
-    isFinalized
-        ? "FINALIZED"
-        : hasEnded
-        ? "AWAIT_FINALIZE"
-        : "OPEN";
+  const phase: MarketPhase = isFinalized
+    ? "FINALIZED"
+    : hasEnded
+    ? "AWAIT_FINALIZE"
+    : "OPEN";
 
   const timeLeftLabel =
     phase === "FINALIZED"
-        ? "Settled"
-        : phase === "AWAIT_FINALIZE"
-        ? "Awaiting finalize"
-        : formatTimeLeft(endTs, nowTs);
+      ? "Settled"
+      : phase === "AWAIT_FINALIZE"
+      ? "Awaiting finalize"
+      : formatTimeLeft(endTs, nowTs);
 
   const isLastMinute = phase === "OPEN" && endTs - nowTs <= 60;
 
@@ -767,9 +840,7 @@ export default function MarketClient({ slug }: MarketClientProps) {
             <h1 className="text-3xl md:text-4xl font-medium">
               {uiMarket.title}
             </h1>
-            <p className="text-sm text-zinc-400">
-              {uiMarket.description}
-            </p>
+            <p className="text-sm text-zinc-400">{uiMarket.description}</p>
           </div>
 
           <div className="text-xs text-zinc-500 space-y-2">
@@ -788,13 +859,13 @@ export default function MarketClient({ slug }: MarketClientProps) {
               </span>
             </div>
             <div className="flex items-center justify-between gap-4">
-            <span className="uppercase tracking-[0.22em]">Status</span>
+              <span className="uppercase tracking-[0.22em]">Status</span>
               <span
                 className={
-                    "text-sm " +
-                    (isLastMinute ? "text-amber-400" : "text-zinc-50")
+                  "text-sm " +
+                  (isLastMinute ? "text-amber-400" : "text-zinc-50")
                 }
-                >
+              >
                 {timeLeftLabel}
               </span>
             </div>
@@ -809,13 +880,13 @@ export default function MarketClient({ slug }: MarketClientProps) {
             {uiMarket.isFinalized && (
               <div className="flex items-center justify-between gap-4">
                 <span className="uppercase tracking-[0.22em]">Winner</span>
-                  <span className="text-sm text-zinc-50">
-                    {uiMarket.winningSide === 0
-                        ? "Tie · refunds"
-                        : uiMarket.winningSide === 1
-                        ? uiMarket.sideA
-                        : uiMarket.sideB}
-                  </span>
+                <span className="text-sm text-zinc-50">
+                  {uiMarket.winningSide === 0
+                    ? "Tie · refunds"
+                    : uiMarket.winningSide === 1
+                    ? uiMarket.sideA
+                    : uiMarket.sideB}
+                </span>
               </div>
             )}
           </div>
@@ -826,84 +897,84 @@ export default function MarketClient({ slug }: MarketClientProps) {
           <div className="grid md:grid-cols-2 min-h-[320px]">
             {/* Left side */}
             <button
-                type="button"
-                onClick={canInteractSides ? () => setSelectedSide("a") : undefined}
-                disabled={!canInteractSides}
-                className={[
-                    "relative flex flex-col justify-between p-6 md:p-8 text-left",
-                    "bg-gradient-to-br",
-                    sideColors.a,
-                    "transform transition-all duration-500 ease-out",
-                    !uiMarket.isFinalized
-                    ? selectedSide === "a"
-                        ? "scale-[1] shadow-[0_18px_40px_rgba(15,23,42,0.6)] z-10"
-                        : "scale-[1] opacity-30 hover:opacity-60"
-                    : isTie
-                    ? "opacity-40 cursor-default"
-                    : isSideAWinner
-                    ? "opacity-100 cursor-default"
-                    : "opacity-20 grayscale cursor-default",
-                ].join(" ")}
-                >
-                <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.24em] text-zinc-50/80">
-                    <span></span>
-                    <span>Side A</span>
-                </div>
-                <div className="flex-1 flex items-center">
-                    <p className="text-3xl md:text-4xl lg:text-5xl font-medium text-zinc-50 text-right w-full">
-                    {uiMarket.sideA}
-                    </p>
-                </div>
-                <p className="text-[11px] text-zinc-50/80 uppercase tracking-[0.24em] text-right w-full">
-                    {!uiMarket.isFinalized
-                    ? "Tap to back this side"
-                    : isTie
-                    ? "Market ended in a tie"
-                    : isSideAWinner
-                    ? "Winning side"
-                    : "Losing side"}
+              type="button"
+              onClick={canInteractSides ? () => setSelectedSide("a") : undefined}
+              disabled={!canInteractSides}
+              className={[
+                "relative flex flex-col justify-between p-6 md:p-8 text-left",
+                "bg-gradient-to-br",
+                sideColors.a,
+                "transform transition-all duration-500 ease-out",
+                !uiMarket.isFinalized
+                  ? selectedSide === "a"
+                    ? "scale-[1] shadow-[0_18px_40px_rgba(15,23,42,0.6)] z-10"
+                    : "scale-[1] opacity-30 hover:opacity-60"
+                  : isTie
+                  ? "opacity-40 cursor-default"
+                  : isSideAWinner
+                  ? "opacity-100 cursor-default"
+                  : "opacity-20 grayscale cursor-default",
+              ].join(" ")}
+            >
+              <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.24em] text-zinc-50/80">
+                <span></span>
+                <span>Side A</span>
+              </div>
+              <div className="flex-1 flex items-center">
+                <p className="text-3xl md:text-4xl lg:text-5xl font-medium text-zinc-50 text-right w-full">
+                  {uiMarket.sideA}
                 </p>
+              </div>
+              <p className="text-[11px] text-zinc-50/80 uppercase tracking-[0.24em] text-right w-full">
+                {!uiMarket.isFinalized
+                  ? "Tap to back this side"
+                  : isTie
+                  ? "Market ended in a tie"
+                  : isSideAWinner
+                  ? "Winning side"
+                  : "Losing side"}
+              </p>
             </button>
 
             {/* Right side */}
             <button
-                type="button"
-                onClick={canInteractSides ? () => setSelectedSide("b") : undefined}
-                disabled={!canInteractSides}
-                className={[
-                    "relative flex flex-col justify-between p-6 md:p-8 text-left",
-                    "bg-gradient-to-bl",
-                    sideColors.b,
-                    "transform transition-all duration-500 ease-out",
-                    !uiMarket.isFinalized
-                    ? selectedSide === "b"
-                        ? "scale-[1] shadow-[0_18px_40px_rgba(15,23,42,0.6)] z-10"
-                        : "scale-[1] opacity-30 hover:opacity-60"
-                    : isTie
-                    ? "opacity-40 cursor-default"
-                    : isSideBWinner
-                    ? "opacity-100 cursor-default"
-                    : "opacity-20 grayscale cursor-default",
-                ].join(" ")}
-                >
-                <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.24em] text-zinc-50/80">
-                    <span>Side B</span>
-                    <span></span>
-                </div>
-                <div className="flex-1 flex items-center">
-                    <p className="text-3xl md:text-4xl lg:text-5xl font-medium text-zinc-50">
-                    {uiMarket.sideB}
-                    </p>
-                </div>
-                <p className="text-[11px] text-zinc-50/80 uppercase tracking-[0.24em]">
-                    {!uiMarket.isFinalized
-                    ? "Tap to back this side"
-                    : isTie
-                    ? "Market ended in a tie"
-                    : isSideBWinner
-                    ? "Winning side"
-                    : "Losing side"}
+              type="button"
+              onClick={canInteractSides ? () => setSelectedSide("b") : undefined}
+              disabled={!canInteractSides}
+              className={[
+                "relative flex flex-col justify-between p-6 md:p-8 text-left",
+                "bg-gradient-to-bl",
+                sideColors.b,
+                "transform transition-all duration-500 ease-out",
+                !uiMarket.isFinalized
+                  ? selectedSide === "b"
+                    ? "scale-[1] shadow-[0_18px_40px_rgba(15,23,42,0.6)] z-10"
+                    : "scale-[1] opacity-30 hover:opacity-60"
+                  : isTie
+                  ? "opacity-40 cursor-default"
+                  : isSideBWinner
+                  ? "opacity-100 cursor-default"
+                  : "opacity-20 grayscale cursor-default",
+              ].join(" ")}
+            >
+              <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.24em] text-zinc-50/80">
+                <span>Side B</span>
+                <span></span>
+              </div>
+              <div className="flex-1 flex items-center">
+                <p className="text-3xl md:text-4xl lg:text-5xl font-medium text-zinc-50">
+                  {uiMarket.sideB}
                 </p>
+              </div>
+              <p className="text-[11px] text-zinc-50/80 uppercase tracking-[0.24em]">
+                {!uiMarket.isFinalized
+                  ? "Tap to back this side"
+                  : isTie
+                  ? "Market ended in a tie"
+                  : isSideBWinner
+                  ? "Winning side"
+                  : "Losing side"}
+              </p>
             </button>
           </div>
         </div>
@@ -952,46 +1023,46 @@ export default function MarketClient({ slug }: MarketClientProps) {
         )}
 
         {uiMarket.isFinalized && (
-        <div className="w-full flex justify-center">
+          <div className="w-full flex justify-center">
             <div className="w-full max-w-xl rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-4 sm:px-6 sm:py-5 space-y-3 text-xs">
-            <div className="space-y-1">
+              <div className="space-y-1">
                 <p className="text-[10px] uppercase tracking-[0.2em] text-emerald-300">
-                {uiMarket.winningSide === 0 ? "Tie · refunds" : "Claims open"}
+                  {uiMarket.winningSide === 0 ? "Tie · refunds" : "Claims open"}
                 </p>
                 <p className="text-emerald-100/90">
-                {uiMarket.winningSide === 0
+                  {uiMarket.winningSide === 0
                     ? "Market ended in a tie. You can refund your contribution (no fee taken)."
                     : "If you backed the winning side, you can now claim your share of the pool. The program will route a small fee to the project treasury."}
                 </p>
                 {claimMessage && (
-                <p className="text-[11px] text-emerald-200/90 pt-1 break-all">
+                  <p className="text-[11px] text-emerald-200/90 pt-1 break-all">
                     {claimMessage}
-                </p>
+                  </p>
                 )}
-            </div>
+              </div>
 
-            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
+              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
                 <button
-                onClick={runCheckWin}
-                disabled={checkingWin || !wallet.publicKey}
-                className="w-full sm:w-auto rounded-full border border-emerald-300/60 px-4 py-2 text-[10px] uppercase tracking-[0.2em] text-emerald-200 hover:bg-emerald-300/10 disabled:opacity-50"
+                  onClick={runCheckWin}
+                  disabled={checkingWin || !wallet.publicKey}
+                  className="w-full sm:w-auto rounded-full border border-emerald-300/60 px-4 py-2 text-[10px] uppercase tracking-[0.2em] text-emerald-200 hover:bg-emerald-300/10 disabled:opacity-50"
                 >
-                {checkingWin ? "Checking..." : "Check my win"}
+                  {checkingWin ? "Checking..." : "Check my win"}
                 </button>
 
                 <button
-                onClick={handleClaim}
-                disabled={
+                  onClick={handleClaim}
+                  disabled={
                     claimLoading ||
                     !wallet.publicKey ||
                     !uiMarket.isFinalized ||
                     (claimPreview
-                    ? !claimPreview.canClaim || claimPreview.hasClaimed
-                    : false)
-                }
-                className="w-full sm:w-auto rounded-full border border-emerald-300/80 bg-emerald-300 text-emerald-950 px-6 py-2 text-[11px] tracking-[0.24em] uppercase hover:bg-transparent hover:text-emerald-100 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      ? !claimPreview.canClaim || claimPreview.hasClaimed
+                      : false)
+                  }
+                  className="w-full sm:w-auto rounded-full border border-emerald-300/80 bg-emerald-300 text-emerald-950 px-6 py-2 text-[11px] tracking-[0.24em] uppercase hover:bg-transparent hover:text-emerald-100 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                {!wallet.publicKey
+                  {!wallet.publicKey
                     ? "Connect wallet"
                     : claimLoading
                     ? "Claiming..."
@@ -1001,140 +1072,129 @@ export default function MarketClient({ slug }: MarketClientProps) {
                     ? "Nothing to claim"
                     : "Claim reward"}
                 </button>
+              </div>
             </div>
-            </div>
-        </div>
+          </div>
         )}
 
         {/* Bottom: buy tickets */}
         {phase === "OPEN" && (
-        <div className="grid gap-8 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] items-start">
-          <div className="space-y-4">
-            <p className="text-[11px] uppercase tracking-[0.32em] text-zinc-500">
-              Choose side & size
-            </p>
+          <div className="grid gap-8 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] items-start">
+            <div className="space-y-4">
+              <p className="text-[11px] uppercase tracking-[0.32em] text-zinc-500">
+                Choose side & size
+              </p>
 
-            <div className="flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => setSelectedSide("a")}
-                className={[
-                  "rounded-full border px-5 py-2 text-xs tracking-[0.2em] uppercase transition-colors duration-300",
-                  selectedSide === "a"
-                    ? "border-zinc-50 bg-zinc-50 text-zinc-900"
-                    : "border-zinc-700 text-zinc-400 hover:text-zinc-50 hover:border-zinc-300",
-                ].join(" ")}
-              >
-                Back {uiMarket.sideA}
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedSide("b")}
-                className={[
-                  "rounded-full border px-5 py-2 text-xs tracking-[0.2em] uppercase transition-colors duration-300",
-                  selectedSide === "b"
-                    ? "border-zinc-50 bg-zinc-50 text-zinc-900"
-                    : "border-zinc-700 text-zinc-400 hover:text-zinc-50 hover:border-zinc-300",
-                ].join(" ")}
-              >
-                Back {uiMarket.sideB}
-              </button>
-            </div>
-
-            <div className="space-y-4 w-full md:max-w-sm">
-              <div className="space-y-2">
-                <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                  Tickets to buy
-                </label>
-                <div className="flex items-center gap-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 px-4 py-3">
-                  <input
-                    type="number"
-                    min={1}
-                    value={tickets}
-                    onChange={(e) =>
-                      setTickets(Math.max(1, Number(e.target.value) || 1))
-                    }
-                    className="w-24 bg-transparent text-sm outline-none text-zinc-50"
-                  />
-                  <div className="flex flex-col text-xs text-zinc-400">
-                    <span>
-                      1 ticket = {uiMarket.ticketPriceSol.toFixed(3)} SOL
-                    </span>
-                    <span>
-                      Est. cost ·{" "}
-                      <span className="text-zinc-50">
-                        {estimatedCost.toFixed(3)} SOL
-                      </span>
-                    </span>
-                  </div>
-                </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => setSelectedSide("a")}
+                  className={[
+                    "rounded-full border px-5 py-2 text-xs tracking-[0.2em] uppercase transition-colors duration-300",
+                    selectedSide === "a"
+                      ? "border-zinc-50 bg-zinc-50 text-zinc-900"
+                      : "border-zinc-700 text-zinc-400 hover:text-zinc-50 hover:border-zinc-300",
+                  ].join(" ")}
+                >
+                  Back {uiMarket.sideA}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSide("b")}
+                  className={[
+                    "rounded-full border px-5 py-2 text-xs tracking-[0.2em] uppercase transition-colors duration-300",
+                    selectedSide === "b"
+                      ? "border-zinc-50 bg-zinc-50 text-zinc-900"
+                      : "border-zinc-700 text-zinc-400 hover:text-zinc-50 hover:border-zinc-300",
+                  ].join(" ")}
+                >
+                  Back {uiMarket.sideB}
+                </button>
               </div>
 
-              {/* НОВИЙ БЛОК ПРО ЛІМІТИ */}
-  
+              <div className="space-y-4 w-full md:max-w-sm">
+                <div className="space-y-2">
+                  <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                    Tickets to buy
+                  </label>
+                  <div className="flex items-center gap-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 px-4 py-3">
+                    <input
+                      type="number"
+                      min={1}
+                      value={tickets}
+                      onChange={(e) =>
+                        setTickets(Math.max(1, Number(e.target.value) || 1))
+                      }
+                      className="w-24 bg-transparent text-sm outline-none text-zinc-50"
+                    />
+                    <div className="flex flex-col text-xs text-zinc-400">
+                      <span>
+                        1 ticket = {uiMarket.ticketPriceSol.toFixed(3)} SOL
+                      </span>
+                      <span>
+                        Est. cost ·{" "}
+                        <span className="text-zinc-50">
+                          {estimatedCost.toFixed(3)} SOL
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
 
-              {buyMessage && (
-                <p className="text-xs text-zinc-400">{buyMessage}</p>
-              )}
-
-              <button
-                onClick={handleBuy}
-                disabled={buyLoading}
-                className="w-full rounded-full bg-zinc-50 text-zinc-900 px-10 py-3 text-[11px] tracking-[0.3em] uppercase border border-zinc-50 hover:bg-transparent hover:text-zinc-50 transition-colors duration-300 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {buyLoading ? "Processing..." : "Confirm side & buy"}
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-4 text-xs text-zinc-400">
-            {/* <p className="text-[11px] uppercase tracking-[0.32em] text-zinc-500">
-              Market information
-            </p>
-            <p>
-              This UI keeps votes hidden on-chain by storing only encrypted
-              hashes. The backend uses a per-market encryptor key to encode
-              your side before sending it to the program.
-            </p>
-            <p>
-              After the timer ends, anyone can trigger a finalize action via the
-              backend. It reveals the encryptor on-chain, computes winners
-              off-chain, and then opens up claims with a protocol fee.
-            </p> */}
-            <div className="rounded-2xl border border-yellow-800 bg-zinc-950/70 px-4 py-3 text-[11px] text-zinc-400 space-y-3">
-              <p className="uppercase tracking-[0.22em] text-zinc-500">
-                Per-user limits
-              </p>
-              <p>
-                You can own at most{" "}
-                <span className="text-zinc-100">
-                  max({USER_ABSOLUTE_TICKET_CAP} tickets, 25% of all tickets in this
-                  market)
-                </span>{" "}
-                across all your purchases.
-                This rule prevents from manipulating the market by big players!
-              </p>
-              <p>
-                Current <span className="text-zinc-100">on-chain</span> balance:{" "}
-                {userOnchainLoading
-                  ? "loading…"
-                  : `${userOnchain?.totalTickets ?? 0} tickets`}
-                {userOnchain && (
-                  <>
-                    {" "}
-                    · ~{userOnchain.totalAmountSol.toFixed(3)} SOL, side: unknown yet.
-                  </>
+                {buyMessage && (
+                  <p className="text-xs text-zinc-400">{buyMessage}</p>
                 )}
-              </p>
-              <p>
-                Purchases limit: up to{" "}
-                <span className="text-zinc-100">{USER_MAX_CHOICES}</span> separate
-                purchases in this market. You can buy many tickets per purchase, but only{" "}
-                {USER_MAX_CHOICES} purchases total.
-              </p>
+
+                <button
+                  onClick={handleBuy}
+                  disabled={buyLoading}
+                  className="w-full rounded-full bg-zinc-50 text-zinc-900 px-10 py-3 text-[11px] tracking-[0.3em] uppercase border border-zinc-50 hover:bg-transparent hover:text-zinc-50 transition-colors duration-300 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {buyLoading ? "Processing..." : "Confirm side & buy"}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-4 text-xs text-zinc-400">
+              {/* LIMITS BLOCK */}
+              <div className="rounded-2xl border border-yellow-800 bg-zinc-950/70 px-4 py-3 text-[11px] text-zinc-400 space-y-3">
+                  <p className="uppercase tracking-[0.22em] text-zinc-500">
+                    Per-user limits
+                  </p>
+                  <p>
+                    You can own at most{" "}
+                    <span className="text-zinc-100">
+                      max({USER_ABSOLUTE_TICKET_CAP} tickets, 25% of all
+                      tickets in this market)
+                    </span>{" "}
+                    across all your purchases. This rule prevents market
+                    manipulation by big players.
+                  </p>
+                  <p>
+                    Current <span className="text-zinc-100">on-chain</span>{" "}
+                    balance:{" "}
+                    {userOnchainLoading
+                      ? "loading…"
+                      : `${userOnchain?.totalTickets ?? 0} tickets`}
+                    {userOnchain && (
+                      <>
+                        {" "}
+                        · ~{userOnchain.totalAmountSol.toFixed(3)} SOL (side
+                        kept hidden on-chain)
+                      </>
+                    )}
+                  </p>
+                  <p>
+                    Purchases limit: up to{" "}
+                    <span className="text-zinc-100">
+                      {USER_MAX_CHOICES}
+                    </span>{" "}
+                    separate purchases in this market. You can buy many tickets
+                    per purchase, but only {USER_MAX_CHOICES} purchases total.
+                  </p>
+                </div>
             </div>
           </div>
-        </div>
         )}
 
         {/* Local ticket summary */}
@@ -1222,6 +1282,157 @@ export default function MarketClient({ slug }: MarketClientProps) {
             </p>
           </div>
         </div>
+
+        {/* MARKET STATS TABLE (FINALIZED ONLY) */}
+        {uiMarket.isFinalized && (
+          <div className="mt-10 space-y-3  w-2/3 mx-auto">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] uppercase tracking-[0.32em] text-zinc-500">
+                Market stats
+              </p>
+              <div className="text-[11px] text-zinc-500">
+                Page {statsPage} / {statsTotalPages || 1}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 overflow-hidden">
+              {statsLoading ? (
+                <div className="px-4 py-6 text-xs text-zinc-500">
+                  Loading stats…
+                </div>
+              ) : statsError ? (
+                <div className="px-4 py-6 text-xs text-red-400">
+                  {statsError}
+                </div>
+              ) : statsRows.length === 0 ? (
+                <div className="px-4 py-6 text-xs text-zinc-500">
+                  No stats available for this market yet.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-zinc-800/80 bg-zinc-900/70">
+                        <th className="px-4 py-3 text-left font-normal text-zinc-500">
+                          Wallet
+                        </th>
+                        <th className="px-3 py-3 text-right font-normal text-zinc-500">
+                          Tickets A
+                        </th>
+                        <th className="px-3 py-3 text-right font-normal text-zinc-500">
+                          Tickets B
+                        </th>
+                        <th className="px-3 py-3 text-right font-normal text-zinc-500">
+                          Staked, SOL
+                        </th>
+                        <th className="px-3 py-3 text-right font-normal text-zinc-500">
+                          PnL, SOL
+                        </th>
+                        <th className="px-4 py-3 text-right font-normal text-zinc-500">
+                          Outcome
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {statsRows.map((row, idx) => {
+                        const pnlClass =
+                          row.pnlSol > 0
+                            ? "text-emerald-400"
+                            : row.pnlSol < 0
+                            ? "text-rose-400"
+                            : "text-zinc-400";
+
+                        const badgeClass =
+                          row.outcome === "WIN"
+                            ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/40"
+                            : row.outcome === "LOSE"
+                            ? "bg-rose-500/10 text-rose-300 border-rose-500/40"
+                            : row.outcome === "TIE"
+                            ? "bg-zinc-500/10 text-zinc-200 border-zinc-500/40"
+                            : "bg-zinc-800/50 text-zinc-300 border-zinc-700";
+
+                        const badgeLabel =
+                          row.outcome === "WIN"
+                            ? "Winner"
+                            : row.outcome === "LOSE"
+                            ? "Loser"
+                            : row.outcome === "TIE"
+                            ? "Tie"
+                            : "Neutral";
+
+                        return (
+                          <tr
+                            key={`${row.wallet}-${idx}`}
+                            className="border-b border-zinc-900/60 hover:bg-zinc-900/40 transition-colors"
+                          >
+                            <td className="px-4 py-3 font-mono text-[11px] text-zinc-300">
+                              {formatAddress(row.wallet)}
+                            </td>
+                            <td className="px-3 py-3 text-right text-zinc-200">
+                              {row.ticketsA}
+                            </td>
+                            <td className="px-3 py-3 text-right text-zinc-200">
+                              {row.ticketsB}
+                            </td>
+                            <td className="px-3 py-3 text-right text-zinc-300">
+                              {row.amountSol.toFixed(4)}
+                            </td>
+                            <td className={`px-3 py-3 text-right ${pnlClass}`}>
+                              {formatPnL(row.pnlSol)}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <span
+                                className={[
+                                  "inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.18em]",
+                                  badgeClass,
+                                ].join(" ")}
+                              >
+                                {badgeLabel}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Pagination controls */}
+            {statsRows.length > 0 && (
+              <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                <span>
+                  Page {statsPage} of {statsTotalPages || 1}
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setStatsPage((p) => Math.max(1, p - 1))
+                    }
+                    disabled={statsPage <= 1}
+                    className="rounded-full border border-zinc-700 px-3 py-1 uppercase tracking-[0.18em] disabled:opacity-40 hover:border-zinc-400 hover:text-zinc-200 transition-colors"
+                  >
+                    Prev
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setStatsPage((p) =>
+                        statsTotalPages ? Math.min(statsTotalPages, p + 1) : p + 1
+                      )
+                    }
+                    disabled={!!statsTotalPages && statsPage >= statsTotalPages}
+                    className="rounded-full border border-zinc-700 px-3 py-1 uppercase tracking-[0.18em] disabled:opacity-40 hover:border-zinc-400 hover:text-zinc-200 transition-colors"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );
