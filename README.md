@@ -2,7 +2,7 @@
 
 > Tiny, memecoin-like prediction battles that spin up and settle in minutes - not months.
 
-![eithr.fun logo placeholder](./docs/media/logo.png)
+![eithr.fun logo placeholder](./docs/media/image.png)
 
 ---
 
@@ -14,11 +14,10 @@
 </p>
 
 <p align="center">
-  <a href="#">Live demo</a> ·
-  <a href="#">Video</a> ·
+  <a href="https://www.eithr.fun/markets">Live demo</a> ·
+  <a href="https://www.youtube.com/watch?v=HH1tiyQCYSI">Video</a> ·
   <a href="#features">Features</a> ·
   <a href="#dev-setup">Dev setup</a> ·
-  <a href="#how-it-works">How it works</a>
 </p>
 
 ---
@@ -32,7 +31,7 @@
 
 ---
 
-## ✨ Features
+## Features
 
 * Fully on-chain Solana markets (no off-chain resolution).
 * Short-lived, meme-style markets that feel like spinning up a memecoin.
@@ -194,7 +193,7 @@ The UI reflects:
 
 ---
 
-## 🛠 Dev setup
+## Dev setup
 
 > Assumes Node ≥ 18, Rust + Solana tools, and Anchor CLI installed.
 
