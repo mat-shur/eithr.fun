@@ -41,34 +41,6 @@
 
 ---
 
-## Screenshots (placeholders)
-
-* **Landing page**
-
-  ```md
-  ![Landing hero](./docs/media/landing-hero.png)
-  ```
-
-* **Markets grid**
-
-  ```md
-  ![Markets grid](./docs/media/markets-grid.png)
-  ```
-
-* **Single market view**
-
-  ```md
-  ![Single market](./docs/media/market-detail.png)
-  ```
-
-* **Claim flow**
-
-  ```md
-  ![Claim modal](./docs/media/claim-flow.png)
-  ```
-
----
-
 ## What is this?
 
 > Aren’t you tired of prediction markets that:
